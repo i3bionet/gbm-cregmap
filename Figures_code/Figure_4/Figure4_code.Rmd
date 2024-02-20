@@ -1,0 +1,268 @@
+---
+title: "GBMcRegMap_Figure4_code"
+author: "pawlakG PAWLAK Geoffrey"
+author: "ConYel Konstantinos Geles"
+date: "Mon Dec 04 2023, Last Update: `r format(Sys.Date(), '%a %b %d %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    df_print: paged
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  html_notebook: null
+---
+
+# Global libraries 
+load libraries
+```{r setup libraries, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# functions
+source("./Fig_misc_functions/misc_functions.R") 
+# data wrangling libraries
+library(readr)
+library(dplyr)   #
+library(tibble)  #
+library(tidyr)   #
+library(stringr) #
+library(forcats) #
+library(rlang)   #
+library(purrr)   #
+library(vroom)
+
+# plot
+library(ggplot2)         #
+library(ggheatmapper)
+library(patchwork)
+
+
+
+```
+
+
+# load data
+```{r}
+# load colors
+wes_cols <- c(wesanderson::wes_palettes$Zissou1[5:1])
+
+dirs_crispcas_k7 <- read_rds("../gbm_EDA/fig4c heatmap/dirsCripsrCas0_results.rds")
+gbmK7 <- read_rds("../gbm_EDA/fig4c heatmap/gbmK7.rds")
+inf <- read_rds("../gbm_EDA/fig4c heatmap/inf.rds")
+
+
+#######################
+# load Verhaak classification
+load("../gbm_EDA/pheno_all_G-CIMP.RData")
+gdata::mv(from = "pheno.all", to = "gbmVerhaak")
+names(gbmVerhaak) <- recodeTCGA(names(gbmVerhaak))
+gbmVerhaak <- gbmVerhaak[!(duplicated(names(gbmVerhaak)))]
+gbmVerhaak1 <- gbmVerhaak %>%
+  fct_recode(., !!!levels_gbm_Verhaak ) %>% 
+  enframe(name = "sample", value = "Verhaak")
+
+# Load expression data
+load("../gbm_EDA/neuroOncology/scripts/inputs/exp_GBM/data_TCGAGBM_agilent.RData")
+expTcga1 <- data
+expTcga1[is.na(expTcga1)] <- 0
+# Recode samples' name
+colnames(expTcga1) <- recodeTCGA(colnames(expTcga1))
+# --------------------------- # 
+# Keep common samples with classification
+expTcga1 <- expTcga1[, intersect(gbmVerhaak1$sample, colnames(expTcga1))]
+
+# influences and classification
+load("../gbm_EDA/inf_gbm_with_cls.Rdata")
+seuratclusters <- inf_gbm_with_cls[,1] %>% 
+  enframe(name = "sample", value = "cRegMap") %>% 
+  mutate(cRegMap = cRegMap %>% 
+           str_c("C",.) %>% 
+           as.factor() %>% 
+           fct_recode(!!!re_format) %>% 
+           factor(., ordered = T ,
+                  levels = c("PN", "PN-L", "NL", "CL-A", "CL-B",
+                             "CL-C", "MES")),
+         sample = recodeTCGA(sample))
+
+col_cl <- c("#53B400", "#FB61D7", "#00B6EB", "#C49A00", "#A58AFF","#00C094","#F8766D") %>%
+    rlang::set_names(levels(seuratclusters$cRegMap))
+
+# Load DE genes
+signifDEagil_k7 <- map(1:7 %>% set_names(str_c("C",.)), 
+    ~readxl::read_xls("../gbm_EDA/GBMTCGAK7DEG_with_cutoff.xls", sheet = .x, 
+                      col_names = c("gene", "adj_pv", "logFC"), skip = 1)) 
+names(signifDEagil_k7) <- c("MES", "CL-A",  "PN",  "CL-C", "NL", "CL-B","PN-L")
+
+# load deconvolution results
+decon_res <- vroom::vroom("../gbm_EDA/GBMDeconvoluteR_GBMrnaseq.csv") %>% 
+  dplyr::rename(sample = Mixture) %>% 
+  mutate(sample = recodeTCGA(sample)) %>% 
+  pivot_longer(-sample, names_to = "cell_type", values_to = "cell_type_estimate" )
+
+# purity plots
+pur_TCGA_rnaseq_inp <- vroom::vroom("../gbm_EDA/TCGA_rnaseq_for_puree.txt") %>% 
+    pull(sample)
+
+pur_TCGA_rnaseq <- vroom::vroom("../gbm_EDA/puree_TCGA_rnaseq.txt") %>% 
+    mutate(sample = pur_TCGA_rnaseq_inp)
+
+# survival plot
+mchClinical <- readRDS("../gbm_EDA/phenotypeInfo.RDS") 
+```
+
+# Fig 4A Influences heatmap
+```{r}
+# ---------------------------------------------------------------------------- %
+# This script use ggheatmap package
+# Find DIRs with Seurat pipelines
+signifInfluence_k7 <- oneVsAllMarkers(data = inf[,names(gbmK7)],
+                                      classification = gbmK7,
+                                      only.pos = TRUE)
+## Save results
+# saveRDS(signifInfluence_k7, "output/expInf_vs_crispr/signifInfluence_k7.rds")
+# ---------------------------------------------------------------------------- %
+# Get top10 DIRs per classes
+top10DIRsSeurat <- lapply(sort(unique(signifInfluence_k7$cluster)), function(x){
+    tmp <- signifInfluence_k7[signifInfluence_k7$cluster == x,]
+    tmp <- tmp[order(tmp$p_val_adj, decreasing = FALSE),]
+    # Keep first 10 DIRs
+    tmp <- tmp[1:10,]
+    y <- unlist(tmp$label) %>% unname()
+    return(y)
+})
+names(top10DIRsSeurat) <- sort(unique(signifInfluence_k7$cluster))
+top10DIRsSeurat <- top10DIRsSeurat[c("PN","PN-L","NL","CL-A","CL-B","CL-C","MES")]
+
+# ---------------------------------------------------------------------------- %
+# Save influence data
+# saveRDS(inf, "output/expInf_vs_crispr/inf.rds")
+# Build influence matrix
+top10SeuratInfMatrix <- sapply(names(top10DIRsSeurat), function(x){
+    samplesClass <- names(gbmK7)[gbmK7 == x]
+    tmpInf <- inf[unlist(top10DIRsSeurat),samplesClass]
+    # tmpInf <- rowMeans(tmpInf)
+    return(tmpInf)
+})
+top10SeuratInfMatrix <- do.call(cbind, top10SeuratInfMatrix)
+
+tmpSamples <- colnames(top10SeuratInfMatrix)
+# --------------------------- #
+#  Keep genes and add a " " at begining for duplicated genes names
+genesNames <- unlist(unlist(top10DIRsSeurat))
+filterDuplicated <- duplicated(genesNames)
+genesNames[filterDuplicated] <- paste0(" ", genesNames[filterDuplicated])
+# Reformat tibble
+top10SeuratInfMatrix <- top10SeuratInfMatrix %>% t() %>% as_tibble()
+# --------------------------- #
+# Rename columns
+colnames(top10SeuratInfMatrix) <- genesNames
+# --------------------------- #
+# Add samples info
+top10SeuratInfMatrix$sample <-tmpSamples
+top10SeuratInfMatrix <- top10SeuratInfMatrix[,c("sample",genesNames)]
+
+
+top10SeuratInfMatrix$group <- factor(gbmK7[top10SeuratInfMatrix$sample], levels = c("PN","PN-L","NL","CL-A","CL-B","CL-C","MES"))
+# top10SeuratInfMatrix <- top10SeuratInfMatrix[,c("sample",genesNames)]
+
+# Duplicated row to see if ggheamtap error comes from the fact that there is only one sample per group
+test <- rbind(tibble(top10SeuratInfMatrix %>% mutate(sample = paste0(sample,"_1"))),top10SeuratInfMatrix)
+
+test$cRegMap <- rep(top10SeuratInfMatrix$sample,2)
+test <- test%>%
+    tibble() %>%
+    group_by(cRegMap)
+
+# top10SeuratInfMatrix$cRegMap <- as.character(gbmK7[top10SeuratInfMatrix$sample])
+top10SeuratInfMatrix <- top10SeuratInfMatrix%>%
+    tibble() %>%
+    group_by(group)
+
+top10SeuratInfMatrix$group <- as.character(top10SeuratInfMatrix$group)
+top10SeuratInfMatrix %>%
+    tibble() %>%
+    group_by(group)
+
+quantile_df <- function(x, probs = c(0, 0.25, 0.5, 0.75, 1)) {
+    tibble(quantile = probs, value = quantile(x, probs))
+}
+to_scales <- top10SeuratInfMatrix %>%
+    dplyr::select(-c(sample)) %>%
+    pivot_longer(-group) %>%
+    dplyr::select(-c(group)) %>%
+    reframe(across(-name, quantile_df)) %>%
+    pull("value") %>%
+    deframe()
+to_scales <- top10SeuratInfMatrix  %>%
+    dplyr::select(-c(sample)) %>%
+    pivot_longer(-group) %>%
+    pull("value") %>%
+    quantile
+
+# Set levels
+top10SeuratInfMatrix$group <- factor(top10SeuratInfMatrix$group, levels = c("PN","PN-L","NL","CL-A","CL-B","CL-C","MES"))
+
+# Set colors
+matrixValues <- top10SeuratInfMatrix %>% ungroup() %>% dplyr::select(-c(sample, group)) %>% as.matrix() %>% as.vector() %>% sort()
+
+quantileMatrixValues <- quantile(matrixValues,
+    probs = c(0, 0.25,0.5, 0.75, 1))
+
+pal <- leaflet::colorNumeric(c("darkblue", "blue", "honeydew","red", "firebrick"),
+    c(-5,-2,0,2,5))
+
+
+hmBreaks <- sapply(quantileMatrixValues, function(x){
+    which.min(abs(matrixValues - x))
+})
+
+gr_gghm <- ggheatmapper::ggheatmap(top10SeuratInfMatrix %>% group_by(group),
+    colv = "sample",
+    rowv = rev(unname(genesNames)),
+    # hm_colors = 'RdBu',
+    # hm_colors = c("blue", "#5555FF", "white","#FF5555", "red"),
+    hm_colors = c("blue","cadetblue", "honeydew", "red", "firebrick"),
+    hm_color_values = scales::rescale(c(-2, 0, 2) ),
+    #hm_color_breaks =  hmBreaks,
+    # hm_color_limits = c(min(scale(to_scales)), max(scale(to_scales))),
+    # hm_color_values = quantileMatrixValues,
+    # hm_color_values =scales::rescale(c(min(to_scales), 0, max(to_scales))),
+    scale = TRUE,
+    center = TRUE,
+    show_dend_row = FALSE,
+    show_colnames = FALSE,
+    # show_rownames = FALSE,
+    group_colors = c(PN = "#53B400", 
+                     `PN-L` = "#FB61D7", 
+                     NL = "#00B6EB", 
+                     `CL-A` = "#C49A00",
+                     `CL-B` = "#A58AFF",
+                     `CL-C` = "#00C094", 
+                     MES = "#F8766D"),
+    colors_title = "Scaled influence",
+    group_prop = 0.03,
+    cluster_rows = FALSE,
+    cluster_cols = FALSE,
+    raster = TRUE,
+    fontsize = 11)
+gr_gghm
+
+
+hm_infTop10DIRs <- gr_gghm +
+    theme(
+        legend.text = element_text(face = "bold"),
+        legend.title = element_text(face="bold"),
+        axis.title.x = element_text(face="bold"),
+        axis.title.y = element_text(face="bold"),
+        axis.text.x = element_text(face="bold"),
+        axis.text.y = element_text(face="bold"))+
+    plot_layout(guides = 'collect')
+  
+ggsave(plot     = hm_infTop10DIRs,
+       device   = "png",
+       filename = file.path("Figure_4/Fig4A_heatmap_influences.png"),
+       units    = "in",
+       width    = 8,
+       height   = 10,
+       dpi      = 300)
+```

@@ -1,0 +1,918 @@
+---
+title: "GBMcRegMap_Figure3_code"
+author: "pawlakG PAWLAK Geoffrey"
+author: "ConYel Konstantinos Geles"
+date: "Mon Dec 04 2023, Last Update: `r format(Sys.Date(), '%a %b %d %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    df_print: paged
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  html_notebook: null
+---
+
+# Global libraries 
+load libraries
+```{r setup libraries, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# functions
+source("./Fig_misc_functions/misc_functions.R") 
+# data wrangling libraries
+library(dplyr)   #
+library(tibble)  #
+library(stringr) #
+library(forcats) #
+library(rlang)   #
+library(purrr)   #
+library(tidyr)   #
+library(vroom)   #
+
+# heatmaps and plots libraries
+library(scales)          #
+library(ComplexHeatmap)  # 
+library(circlize)        #
+library(wesanderson)     #
+library(ggplot2)         #
+
+# Functional enrichment analysis
+library(clusterProfiler) # 
+library(ReactomePA)      # 
+library(org.Hs.eg.db)    #
+
+# oncoplot data and plotting
+library(maftools)     #
+
+# ontology signature score and cellular state 
+library(msigdbr)    #
+library(singscore)  #
+library(openxlsx)   #
+
+# for survival curves
+library(survminer) #
+library(survival)  #
+
+# for recurrence sankey 
+library(networkD3) #
+```
+
+
+# load data
+```{r}
+# load colors
+wes_cols <- c(wesanderson::wes_palettes$Zissou1[5:1])
+
+# load Verhaak classification
+load("../gbm_EDA/pheno_all_G-CIMP.RData")
+gdata::mv(from = "pheno.all", to = "gbmVerhaak")
+names(gbmVerhaak) <- recodeTCGA(names(gbmVerhaak))
+gbmVerhaak <- gbmVerhaak[!(duplicated(names(gbmVerhaak)))]
+gbmVerhaak1 <- gbmVerhaak %>%
+  fct_recode(., !!!levels_gbm_Verhaak ) %>% 
+  enframe(name = "sample", value = "Verhaak")
+
+# Load expression data
+load("../gbm_EDA/neuroOncology/scripts/inputs/exp_GBM/data_TCGAGBM_agilent.RData")
+expTcga1 <- data
+expTcga1[is.na(expTcga1)] <- 0
+# Recode samples' name
+colnames(expTcga1) <- recodeTCGA(colnames(expTcga1))
+# --------------------------- # 
+# Keep common samples with classification
+expTcga1 <- expTcga1[, intersect(gbmVerhaak1$sample, colnames(expTcga1))]
+
+# influences and classification
+load("../gbm_EDA/inf_gbm_with_cls.Rdata")
+seuratclusters <- inf_gbm_with_cls[,1] %>% 
+  enframe(name = "sample", value = "cRegMap") %>% 
+  mutate(cRegMap = cRegMap %>% 
+           str_c("C",.) %>% 
+           as.factor() %>% 
+           fct_recode(!!!re_format) %>% 
+           factor(., ordered = T ,
+                  levels = c("PN", "PN-L", "NL", "CL-A", "CL-B",
+                             "CL-C", "MES")),
+         sample = recodeTCGA(sample))
+
+col_cl <- c("#53B400", "#FB61D7", "#00B6EB", "#C49A00", "#A58AFF","#00C094","#F8766D") %>%
+    rlang::set_names(levels(seuratclusters$cRegMap))
+
+# Load DE genes
+signifDEagil_k7 <- map(1:7 %>% set_names(str_c("C",.)), 
+    ~readxl::read_xls("../gbm_EDA/GBMTCGAK7DEG_with_cutoff.xls", sheet = .x, 
+                      col_names = c("gene", "adj_pv", "logFC"), skip = 1)) 
+names(signifDEagil_k7) <- c("MES", "CL-A",  "PN",  "CL-C", "NL", "CL-B","PN-L")
+
+# load deconvolution results
+decon_res <- vroom::vroom("../gbm_EDA/GBMDeconvoluteR_GBMrnaseq.csv") %>% 
+  dplyr::rename(sample = Mixture) %>% 
+  mutate(sample = recodeTCGA(sample)) %>% 
+  pivot_longer(-sample, names_to = "cell_type", values_to = "cell_type_estimate" )
+
+# purity plots
+pur_TCGA_rnaseq_inp <- vroom::vroom("../gbm_EDA/TCGA_rnaseq_for_puree.txt") %>% 
+    pull(sample)
+
+pur_TCGA_rnaseq <- vroom::vroom("../gbm_EDA/puree_TCGA_rnaseq.txt") %>% 
+    mutate(sample = pur_TCGA_rnaseq_inp)
+
+# survival plot
+mchClinical <- readRDS("../gbm_EDA/phenotypeInfo.RDS") 
+
+# recurrenece
+rec_gbm_tb <- vroom("../gbm_EDA/recurrent/all248samples_GBM_cRegMap_class.txt")
+```
+
+# Fig 3A Complex Heatmap GBM
+
+## make heatmap 
+```{r}
+expTcga1[1:3, 1:3] #data
+markers
+mat_gen <- intersect(rownames(expTcga1), unique(markers$gene))
+marker_genes_ht <- markers %>% 
+  filter(gene %in% mat_gen) %>% 
+  column_to_rownames("gene") 
+
+set.seed(7446834)   
+my_random_vec <- sample(colnames(expTcga1))  
+
+mat <- expTcga1[rownames(marker_genes_ht), my_random_vec] %>% 
+  t() %>% 
+  scale() %>% 
+  t()
+
+md_dt <- seuratclusters %>% 
+  left_join(gbmVerhaak1, by = join_by("sample")) %>% 
+  filter(sample %in% colnames(mat)) %>%
+  column_to_rownames("sample")
+
+md_dt <- md_dt[colnames(mat),]
+
+stopifnot(identical(rownames(mat), markers$gene))
+stopifnot(identical(rownames(md_dt), colnames(mat)))
+
+ha_col <- HeatmapAnnotation(
+    df  = md_dt,
+    col = list(cRegMap = hue_pal()(7) %>%
+      set_names(c("MES", "CL-A",  "PN",  "CL-C", "NL", "CL-B","PN-L")),
+      Verhaak = classes_to_colors_Verhak ),
+    annotation_legend_param = map(1: ncol(md_dt),
+                                  ~list(title_gp = gpar(fontsize = 16, fontface = "bold"),
+                                        labels_gp = gpar(fontsize = 16, fontface = "bold"),
+                                        ncol = 1
+                                        #direction = "horizontal"
+                                        )),
+    annotation_name_gp = gpar(fontsize = 16),
+    which = "col"
+)
+
+ha_row <- HeatmapAnnotation(
+    df  = marker_genes_ht,
+    col = list(Signature = ggpubr::get_palette(palette = "lancet", 
+                                          k = marker_genes_ht$Signature %>% levels %>% length()) %>%
+      set_names(marker_genes_ht$Signature %>% levels)),
+    annotation_legend_param = map(1: ncol(marker_genes_ht),
+                                  ~list(title_gp = gpar(fontsize = 16, fontface = "bold"),
+                                        labels_gp = gpar(fontsize = 16, fontface = "bold"),
+                                        ncol = 1
+                                        #direction = "horizontal"
+                                        )),
+    show_annotation_name =  FALSE,
+    annotation_name_gp = gpar(fontsize = 16),
+    which = "row"
+)
+
+quantile(mat)
+
+f_mat <- colorRamp2(c(-2, 0, 2),
+    c("green",   "black",  "red" ))
+
+ht_mat <- Heatmap(
+    matrix            = mat,         #data
+    top_annotation    = ha_col,      #annot for columns
+    right_annotation  = ha_row,      #annot for genes
+    col               = f_mat,         #colors expression
+    show_column_names = FALSE,
+    cluster_columns   = FALSE,
+    cluster_rows      = TRUE,
+    show_row_dend     = FALSE,
+    
+    row_title = NULL,
+    row_split             = dplyr::select(marker_genes_ht, Signature),
+    cluster_row_slices    = FALSE, #don't change slice column order
+    column_split          = dplyr::select(md_dt, cRegMap),
+    cluster_column_slices = FALSE, #don't change slice column order
+    
+    column_title = NULL,
+    row_title_gp     = gpar(fontsize = 16, fontface = "bold"),
+    row_names_gp     = gpar(fontsize = 17, fontface = "bold" ),
+    column_title_gp  = gpar(fontsize = 16, fontface = "bold"),
+    column_names_gp  = gpar(fontsize = 16, fontface = "bold"),
+
+    heatmap_legend_param = list(
+      #direction = "horizontal",
+      title_gp  = gpar(fontsize = 16, fontface = "bold"),
+      labels_gp = gpar(fontsize = 16, fontface = "bold")),
+    name        = "Scaled\nExpression",
+    width = ncol(mat)*unit(0.3, "mm"), 
+    height = nrow(mat)*unit(5,  "mm"),
+    row_dend_reorder    = TRUE,
+ 
+    clustering_method_rows      = "ward.D2",
+    clustering_distance_rows    = "euclidean"
+)
+
+png(filename = "Figure_3/Fig3A_complex_heatmap.png",
+      height   = 20.3,
+      width    = 9,
+      units    = 'in',
+      res      = 300)
+  draw(ht_mat, 
+       heatmap_legend_side = "bottom",
+       annotation_legend_side = "bottom",
+       merge_legend = TRUE)
+dev.off()
+```
+
+# Fig 3B GOBP compare clusters AGilent
+```{r}
+genes_gobp <- seuratclusters$cRegMap %>% 
+  levels %>% 
+  rlang::set_names() %>% 
+  map(~magrittr::extract2(signifDEagil_k7,.x) %>% pull( gene) %>% 
+        bitr(., fromType = "SYMBOL", toType = "ENTREZID", 
+             OrgDb = "org.Hs.eg.db") %>% 
+        pull("ENTREZID") %>% 
+        unique())
+
+ck_GO <-  compareCluster(geneCluster = genes_gobp, fun = enrichGO,
+                         ont="BP", OrgDb = org.Hs.eg.db )
+ck_GO <- setReadable(ck_GO, OrgDb = org.Hs.eg.db, keyType="ENTREZID")
+
+## GO
+pub_theme_GOBP <- list(
+    theme(
+        title        = element_text(size = 16,
+                                    colour = "black", face = "bold"),
+        legend.title = element_text(size = 16,
+                                    colour = "black", face = "bold"),
+        legend.text  = element_text(size = 16,
+                                   colour = "black", face = "bold"),
+        axis.text.x  = element_text(size = 14,
+                                   colour = "black", face = "bold"),
+        axis.title.x = element_blank(),
+        axis.text.y  = element_text(size = 16,
+                                   colour = "black", face = "bold"),
+        axis.title.y = element_text(size = 16,
+                                  colour = "black", face = "bold"),
+        strip.text   = element_text(size = 16, colour = "black",
+                                  face = "bold"),
+        axis.line    = element_line(color='black', linewidth = 1.3),
+
+        axis.ticks.x     = element_blank(),
+        #plot.background  = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(size = 0.35),
+        panel.border     = element_rect(color = "black", linewidth = 1.3),
+        )
+)
+
+terms_BP <- c("Transport Across Blood-Brain Barrier (GO:0150104)", #!
+"Dopamine Metabolic Process (GO:0042417)",
+"Fatty Acid Oxidation (GO:0019395)",
+"NAD Metabolic Process (GO:0019674)",
+"Amino Acid Catabolic Process (GO:0009063)",
+"Positive Regulation Of Neural Precursor Cell Proliferation (GO:2000179)",
+"Positive Regulation Of Cell Migration (GO:0030335)",
+"Negative Regulation Of Cell Differentiation (GO:0045596)",
+"Regulation Of MAP Kinase Activity (GO:0043405)",
+"Cell-Matrix Adhesion (GO:0007160)",
+"Fibrinolysis (GO:0042730)",
+"Negative Regulation Of Endothelial Cell Apoptotic Process (GO:2000352)",
+"Negative Regulation Of Epithelial Cell Apoptotic Process (GO:1904036)",
+"ERBB Signaling Pathway (GO:0038127)",
+"Blood Coagulation, Fibrin Clot Formation (GO:0072378)",
+"Epithelial Cell Differentiation (GO:0030855)",
+"Lipid Transport (GO:0006869)",
+"Regulation Of Lipid Catabolic Process (GO:0050994)")
+
+terms_BP_GO <- terms_BP %>% #!
+  str_remove(".+[(]") %>% 
+   str_remove("\\)") %>% 
+  str_c(collapse = "|")
+
+
+top2go_perclust <- ck_GO@compareClusterResult %>% #!
+  as_tibble() %>%
+  arrange(p.adjust) %>% 
+  group_by(Cluster) %>% 
+  slice_head(n = 3) %>% 
+  ungroup() %>% 
+  pull(ID) %>% 
+  str_subset("GO:0001654|GO:0150063",negate = T) %>% 
+  c(.,"GO:0051592", "GO:0007411", "GO:0051966", "GO:0017158") %>% 
+  str_c(collapse = "|")
+
+lipid <- c("GO:0006869")#!
+
+ck_GO2 <- ck_GO
+
+ck_GO2@compareClusterResult <- ck_GO@compareClusterResult %>% 
+  as_tibble() %>% 
+  filter(ID %in% lipid|
+           str_detect(ID, terms_BP_GO)|
+           str_detect(ID, top2go_perclust)) %>% 
+  filter(!str_detect(Description, "endopeptidase|nervous system development|camera|dopamine")) %>% 
+  arrange(Cluster, p.adjust) %>% 
+  as.data.frame() 
+
+ck_GO2@compareClusterResult <- ck_GO2@compareClusterResult %>% 
+  mutate(Description = str_replace(Description, "regulation", "reg.") %>% 
+           str_replace("positive", "pos.") %>% 
+           str_replace("negative", "neg.")
+         )
+
+ck_GO2@compareClusterResult <- ck_GO2@compareClusterResult %>% 
+  arrange(Cluster)
+#ck_GO2
+ck_GO2_p <- dotplot(ck_GO2, label_format = 80, showCategory = 40) +
+    scale_color_gradientn(colours = wes_cols,
+                        guide = guide_colorbar(reverse = TRUE, order = 1)) +
+  labs(x = "GBMRegMap")+
+  theme_bw()+ 
+  pub_theme_GOBP
+```
+
+## export the plot
+```{r}
+ggsave(plot     = ck_GO2_p,
+       device   = "png",
+       filename = "Figure_3/Fig3B_gbm_compare_GO_k7.png",
+       units    = "in",
+       width    = 10,
+       height   = 8,
+       dpi      = 400)
+```
+
+# Fig 3C Oncoplot
+## import data from TCGA and match samples names with one of metadata DT
+
+```{r}
+seuratclusters1 <- inf_gbm_with_cls[,1]
+MutationalData <- maftools::tcgaLoad(study = "GBM")
+
+MutationalData@data$Tumor_Sample_cut <- MutationalData@data$Tumor_Sample_Barcode %>% 
+  str_remove("-01.+")
+
+dist_ct <- MutationalData@data %>% 
+  dplyr::distinct(Tumor_Sample_Barcode, Tumor_Sample_cut) %>% 
+  filter(Tumor_Sample_cut %in% names(seuratclusters1)) %>% 
+  filter(!Tumor_Sample_cut %in% c("TCGA-06-5416", "TCGA-19-5956"))
+
+tsb_unique <- unique(MutationalData@data$Tumor_Sample_cut)
+
+
+## Remove NAs
+names(seuratclusters1) <- lapply(names(seuratclusters1), function(x){
+    tsb_unique[grepl(x, tsb_unique)][1] %>% as.character()
+}) %>% unlist()
+## Remove NAs
+seuratclusters1 <- seuratclusters1[!(is.na(names(seuratclusters1)))]
+
+## change TCGA names
+seuratclusters1 <- seuratclusters1[dist_ct$Tumor_Sample_cut]
+names(seuratclusters1) <- dist_ct$Tumor_Sample_Barcode
+
+seuratclusters1 <- sort(seuratclusters1)
+seuratclustersb <- seuratclusters1 %>% 
+  str_c("C",.) %>% 
+  as.factor() %>% 
+  fct_recode(!!!re_format) %>%
+  factor(., ordered = T , levels = c("PN", "PN-L", "NL", "CL-A", "CL-B",
+                             "CL-C", "MES"))
+names(seuratclustersb) <- names(seuratclusters1)
+```
+
+## subset the dataset for the samples in the Seurat object
+```{r}
+MutationalData <- subsetMaf(MutationalData, tsb = names(seuratclustersb))
+# --------------------------- # 
+# Add seurat cluster info
+MutationalData@clinical.data$seuratClusters <- seuratclustersb[MutationalData@clinical.data$Tumor_Sample_Barcode]
+# --------------------------- # 
+# Reorder seuratClusters
+MutationalData@clinical.data <- MutationalData@clinical.data[order(MutationalData@clinical.data$seuratClusters),]
+```
+
+## find most altered genes per cluster
+```{r}
+variants_dat <- MutationalData@data %>% 
+  dplyr::select(Hugo_Symbol, Variant_Classification, Tumor_Sample_Barcode, Tumor_Sample_cut) %>% 
+  as_tibble()
+
+clusters_dt <- seuratclustersb %>% 
+  enframe(name = "Tumor_Sample_Barcode" , value = "cluster") %>% 
+  mutate()
+## check top altered samples
+variants_dat %>% 
+  left_join(clusters_dt) %>% 
+  dplyr::count(cluster, Tumor_Sample_cut, sort = T)
+
+genes_2 <- c(
+  "PTEN","TP53","TTN","EGFR","MUC16", "FLG", "NF1", "RYR2", "SPTA1",  "ATRX",
+  "RB1", "PIK3CA",  "LRP2", "IDH1", "STAG2", "PDGFRA", "DNAH9", "GABRA1",
+   "NRAS", "PPARG")
+
+genes <-variants_dat %>% 
+    distinct(Hugo_Symbol, Tumor_Sample_Barcode) %>% 
+    left_join(clusters_dt) %>% 
+    dplyr::count(Hugo_Symbol, sort = T) %>% 
+    filter(Hugo_Symbol %in% genes_2) %>% 
+    pull(Hugo_Symbol)
+# ---------------------------------------------------------------------------- %
+# Set colors
+
+
+#colors <-  hue_pal()(length(unique(seuratclustersb)))
+#names(colors) <- unique(seuratclusters) %>% sort()
+colors <- list("seuratClusters" = col_cl)
+
+vc_cols <- rep("black", 9)
+names(vc_cols) = c(
+  'Frame_Shift_Del',
+  'Missense_Mutation',
+  'Nonsense_Mutation',
+  'Multi_Hit',
+  'Frame_Shift_Ins',
+  'In_Frame_Ins',
+  'Splice_Site',
+  'In_Frame_Del',
+  "Translation_Start_Site"
+)
+# ---------------------------------------------------------------------------- %
+# Plot full oncoplot
+
+file_folder <- "Figure_3"
+
+png(filename =  file.path(file_folder, "Fig3C_GBM_all_clusters_oncoplot.png"),
+    width = 1800, height = 2000, res = 300)
+
+oncoplot(MutationalData,
+         clinicalFeatures = 'seuratClusters',
+         sortByAnnotation = TRUE,
+         colors = vc_cols,
+         annotationColor = colors,
+         genes = genes,
+         keepGeneOrder = T,
+         gene_mar = 6)
+dev.off()
+# ---------------------------------------------------------------------------- %
+# Plot and save oncoplots
+for (group in unique(MutationalData@clinical.data$seuratClusters)){
+    print(group)
+    sub_seurat <- seuratclustersb[seuratclustersb == group]
+    sub_MutationalData <- subsetMaf(maf = MutationalData, tsb = names(sub_seurat))
+    if (length(unique(sub_MutationalData@data$Tumor_Sample_Barcode))>3){
+    png(filename = file.path(file_folder, paste0("Fig3C_GBM_", group, "_hr_genes.png")), 
+        width = 1800, height = 2000, res = 300)
+    oncoplot(sub_MutationalData,
+             clinicalFeatures = 'seuratClusters',
+             sortByAnnotation = TRUE,
+             annotationColor = colors,
+             colors = vc_cols,
+             gene_mar = 6, 
+             genes = genes, 
+             keepGeneOrder = TRUE)
+    dev.off()
+    }
+}
+
+```
+
+# Fig 3D heatmap cellular state metabolism
+## singscore 
+```{r}
+## singscore score ---- 
+h_gene_sets <- msigdbr(species = "human", category = "H")
+GO_gene_sets <- msigdbr(species = "human", category = "C5", subcategory = "GO:BP")
+hallmarks <- list("OXIDATIVE_PHOSPHORYLATION", 
+                  "GLYCOLYSIS",
+                  "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION" )
+GOBP <- list("GOBP_FATTY_ACID_BETA_OXIDATION$", 
+             "FATTY_ACID_ALPHA_O", 
+             "FATTY_ACID_OMEGA_O",
+             "LIPID_OXIDATION")
+GOBP <- "GOBP_LIPID_METABOLIC_PROCESS"
+GO_gene_sets %>% filter(str_detect(gs_name, "LIPID_MET")) %>% count(gs_name)
+
+h_gene_set <- map(hallmarks, ~ h_gene_sets %>%
+  filter(str_detect(gs_name, .x)) %>% 
+    dplyr::select(gs_name, gene_symbol))
+h_gene_set_names <- map(h_gene_set, ~pull(.x, gs_name) %>% 
+                           unique())
+names(h_gene_set) <- h_gene_set_names
+
+GO_gene_set <- map(GOBP, ~ GO_gene_sets %>%
+  filter(str_detect(gs_name, .x)) %>% 
+    dplyr::select(gs_name, gene_symbol))
+GO_gene_set_names <- map(GO_gene_set, ~pull(.x, gs_name) %>% 
+                           unique())
+names(GO_gene_set) <- GO_gene_set_names
+# h_gene_set_OXPHO <- h_gene_sets %>%  filter(str_detect(gs_name, "OXIDATIVE_PHOSPHORYLATION"))
+
+
+rankData <- singscore::rankGenes(expTcga1)
+# list("HIF1_signature" = HIF1_GS, "AMPK_signature" = AMPK))
+genes_intersect <- 
+  map(c(h_gene_set, GO_gene_set), 
+        ~intersect(rownames(expTcga1), unique(.x$gene_symbol)))
+#genes_int_OXPHO <- intersect(rownames(expTcga1), unique(h_gene_set_OXPHO$gene_symbol))
+scores_agilent <- map(genes_intersect,
+                      ~simpleScore(rankData,  upSet = .x) %>% 
+  as_tibble(rownames = "sample")) %>% 
+  bind_rows(.id = "Hallmark")
+
+#scores_OXPHO  <-  simpleScore(rankData, upSet = genes_int_OXPHO) 
+                    
+### save terms  ------
+wb <- createWorkbook()
+addWorksheet(wb, "S1")
+writeDataTable(wb, "S1", x = scores_agilent, withFilter = FALSE)
+saveWorkbook(wb, file.path("tcga_agilent_gbm_score_hallmarks_GOBP.xlsx"),
+             overwrite = TRUE)
+
+```
+
+## Double heatmap
+```{r}
+decon_res <- decon_res %>% 
+  left_join(seuratclusters) 
+
+annotdt <- decon_res %>% 
+    distinct(cell_type) %>% 
+    arrange(cell_type) %>% 
+    mutate( colcr = cell_type) %>%
+    mutate(cell_type = factor(cell_type, levels = c(
+      "Microglia", "Macrophage", "Monocyte", "B Cells", "T Cells", 
+      "NK Cells",  "Mast Cells", "DC",
+      "NPC", "OPC",  "AC", "MES"
+    ))) %>% 
+    dplyr::rename("Cell type" = cell_type) %>% 
+    column_to_rownames("colcr")
+
+
+seuratclusters_rnaseq <- decon_res %>%
+    group_by(cRegMap, cell_type) %>%
+    summarize( mean_perc = mean(cell_type_estimate)) %>%
+    pivot_wider(names_from = cell_type, values_from = mean_perc) %>%
+    column_to_rownames("cRegMap") %>%
+    as.matrix() %>%
+    t()
+
+seuratclusters_rnaseq
+
+quantiles_nt_test <-  decon_res %>%
+    group_by(cRegMap, cell_type) %>%
+    summarize( mean_perc = mean(cell_type_estimate)) %>%
+    group_by(cell_type) %>%
+    mutate(matt = case_when(
+    mean_perc  > quantile(mean_perc, 0.99)  ~ "***",
+    mean_perc > quantile(mean_perc, 0.95)  ~ "**",
+    mean_perc  > quantile(mean_perc, 0.9)  ~ "*",
+    TRUE  ~ "",
+    )) %>%
+   dplyr::select(-mean_perc) %>%
+   pivot_wider(names_from = cell_type, values_from = matt) %>%
+   column_to_rownames("cRegMap") %>%
+   as.matrix() %>%
+   t()
+
+################################################################################
+annotdt <- decon_res %>% 
+    distinct(cell_type) %>% 
+    arrange(cell_type) %>% 
+    mutate( colcr = cell_type) %>%
+    mutate(
+      cell_type = factor(cell_type, levels = c(
+      "Microglia", "Macrophage", "Monocyte", "B Cells", "T Cells", 
+      "NK Cells",  "Mast Cells", "DC",
+      "NPC", "OPC",  "AC", "MES" )),
+      cell = c("cellular_state", "immune_cell", "immune_cell", 
+               "cellular_state","immune_cell", "immune_cell", "immune_cell",
+               "immune_cell", "immune_cell", "cellular_state", "cellular_state",
+               "immune_cell")
+      ) %>% 
+    dplyr::rename("Cell type" = cell_type) %>% 
+    column_to_rownames("colcr") 
+
+ha_1 <- HeatmapAnnotation(
+    df  = annotdt,
+    col = list(`Cell type` = colorBlindness::paletteMartin[1:12] %>%
+      set_names(annotdt$`Cell type`)),
+     annotation_legend_param = list(`Cell type` = list(title_gp = gpar(fontsize = 18, 
+                                                                       fontface = "bold"),
+                                   labels_gp = gpar(fontsize = 18, fontface = "bold"),
+                                        ncol = 1,
+                                        direction = "horizontal", 
+                                   legend_width = unit(3, "cm"))
+     ),
+   which = "row"
+  )
+ha_2 <- HeatmapAnnotation(
+    classes  = levels(decon_res$cRegMap) %>% as_factor(),
+    col = list(classes = hue_pal()(7) %>%
+      set_names(c("MES", "CL-A",  "PN",  "CL-C", "NL", "CL-B","PN-L"))),
+    annotation_legend_param = list(title_gp = gpar(fontsize = 18, fontface = "bold"),
+                                   labels_gp = gpar(fontsize = 18, fontface = "bold"),
+                                        ncol = 2,
+                                        direction = "horizontal")
+  )
+
+f_c <- colorRamp2(c(0, 8, 15),
+    c("navy", "white",  "darkred"))
+
+ht_1 <- Heatmap(
+    matrix           = seuratclusters_rnaseq,#data
+    top_annotation   = ha_2,      #annot for columns
+    col              = f_c,         #colors expression
+    row_names_side    = "left",
+    show_column_names = FALSE,
+    cluster_columns   = FALSE,
+    cluster_rows      = FALSE,
+    row_split          = dplyr::select(annotdt, cell),
+    
+    cell_fun = function(j, i, x, y, w, h, fill) {
+    if(quantiles_nt_test[i, j] == "***") {
+        grid.text("***", x, y)
+    } else if(quantiles_nt_test[i, j] == "**"){
+        grid.text("**", x, y)
+    } else if(quantiles_nt_test[i, j] == "*"){
+        grid.text("*", x, y)
+    } else{
+      grid.text("", x, y)
+    }
+    },
+    row_title_gp     = gpar(fontsize = 18, fontface = "bold"),
+    row_names_gp     = gpar(fontsize = 16, fontface = "bold" ),
+    column_title_gp  = gpar(fontsize = 16, fontface = "bold"),
+    column_names_gp  = gpar(fontsize = 14 ),
+    row_title = c("Cellular State\n(Neftel et\nal. 2019)", "Immune Cell"),
+    #row_title_rot = 0,
+
+    heatmap_legend_param = list(
+      direction = "horizontal",
+      title_gp  = gpar(fontsize = 18, fontface = "bold"),
+      labels_gp = gpar(fontsize = 18, fontface = "bold")),
+    name        = "GBMdeconvoluteR\nscore",
+    width = ncol(seuratclusters_rnaseq)*unit(20, "mm"), 
+    height = nrow(seuratclusters_rnaseq)*unit(20, "mm")
+)  
+
+# draw(ht_1, heatmap_legend_side="right", 
+#      annotation_legend_side="right",
+#            legend_grouping = "original")
+################################################################################ 
+##add the signscore heatmap
+
+sign_score <- readxl::read_xlsx("../gbm_EDA/tcga_agilent_gbm_score_hallmarks_GOBP.xlsx")  %>% 
+  dplyr::select(-TotalDispersion) %>% 
+  pivot_wider(names_from = "Hallmark", values_from = "TotalScore") %>% 
+  dplyr::select(-starts_with("HALLMARK_EPITHELIAL"))
+
+#rowv <- sign_score %>% dplyr::select(-sample) %>% names
+
+sign_score <- sign_score %>% 
+  left_join(seuratclusters, 
+            by = join_by(sample)) %>% 
+  pivot_longer(cols = -c(sample, cRegMap), names_to = "Hallmark", 
+               values_to = "TotalScore") %>% 
+  group_by(cRegMap, Hallmark) %>% 
+  summarize( mean_perc = mean(TotalScore)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = cRegMap, values_from = mean_perc) %>% 
+  column_to_rownames("Hallmark") %>% 
+  as.matrix() %>% 
+  t() %>% 
+  scale %>% 
+  t()
+
+rownames(sign_score) <- c("Lipid", "Glycolysis", "OXPHOS")
+
+f_c1 <- colorRamp2(c(-1, -0.5, 0, 0.5, 1),
+    c("#440154FF", "#3B528BFF", "#21908CFF", "#5DC863FF", "#FDE725FF"))
+
+ha_3 <- HeatmapAnnotation(
+      classes  =  rep("Metabolism", 3),
+     annotation_legend_param = list(list(title_gp = gpar(fontsize = 18, fontface = "bold"),
+                                   labels_gp = gpar(fontsize = 18, fontface = "bold"),
+                                        ncol = 1,
+                                        direction = "horizontal", 
+                                   legend_width = unit(3, "cm"))
+     ),
+   which = "row"
+  )
+ht_2 <- Heatmap(
+    matrix            = sign_score,#data
+    #top_annotation   = ha_2,      #annot for columns
+    #right_annotation = ha_3,      #annot for genes
+    col               = f_c1,         #colors expression
+    show_column_names = FALSE,
+    cluster_columns   = FALSE,
+    cluster_rows      = FALSE,
+    row_names_side    = "left",
+    #row_split         = dplyr::select(annotdt, cell),
+    row_title_gp     = gpar(fontsize = 18, fontface = "bold"),
+    row_names_gp     = gpar(fontsize = 16, fontface = "bold" ),
+    column_title_gp  = gpar(fontsize = 18, fontface = "bold"),
+    column_names_gp  = gpar(fontsize = 18, fontface = "bold"),
+    row_title = "Metabolism",
+    #row_title_rot = 0,
+    heatmap_legend_param = list(
+      direction = "horizontal",
+      title_gp  = gpar(fontsize = 18, fontface = "bold"),
+      labels_gp = gpar(fontsize = 18, fontface = "bold")),
+    name        = "scaled\n signature score",
+    width = ncol(sign_score)*unit(20, "mm"), 
+    height = nrow(sign_score)*unit(20, "mm")
+)
+
+ht_list  <-  ht_1 %v% ht_2 
+
+png(filename = "Figure_3/Fig3D_GBM_signscore_deconv.png",
+      height   = 14,
+      width    = 10,
+      units    = 'in',
+      res      = 300)
+  draw(ht_list, 
+       heatmap_legend_side = "bottom",
+       annotation_legend_side = "bottom",
+       merge_legend = TRUE)
+dev.off()
+
+```
+
+# Fig 3E purity plot
+```{r}
+pur_TCGA_rnaseq <- pur_TCGA_rnaseq %>% 
+    left_join(seuratclusters) %>% 
+    filter(!is.na(cRegMap))
+
+purity_plot <- pur_TCGA_rnaseq %>% 
+    ggplot(., mapping = aes(x = cRegMap, y = purity, color = cRegMap)) +
+    geom_boxplot()+
+    geom_jitter(width = 0.3)+
+    scale_color_manual(values = col_cl)+
+    labs(y     = "Tumor Purity", 
+       color  = "cRegMap") + 
+    theme_bw()+
+    guides(fill=guide_legend(nrow=2,byrow=TRUE))+
+    pub_theme_purre
+
+ggsave(plot = purity_plot,
+         device = "png",
+         filename = file.path("Figure_3/Fig3E_purity_plot_tcga.png"),
+         units = "in",
+         width = 8,
+         height = 16,
+         dpi = 300)
+```
+
+# Fig 3F survival plot
+```{r}
+gbmK7_survival_restricted <- inf_gbm_with_cls[,1][mchClinical$Sample]
+gbmK7_survival_restricted <- seuratclusters %>% 
+  filter(sample %in% mchClinical$Sample )
+# --------------------------- # 
+# Add new column
+
+mchClinical_restricted <- mchClinical %>% 
+  left_join(gbmK7_survival_restricted, by= c("Sample" = "sample")) %>% 
+  dplyr::rename(regmapK7 = cRegMap) %>% 
+  mutate(status = if_else(status == "Dead",
+                                  true = 1, false = 0),
+         across(c(survival, status), ~as.numeric(.x))) %>%
+  filter(!is.na(status)) %>% 
+  as_tibble()
+
+# Compute survival curves
+
+fit <- survfit(Surv(survival, status) ~ regmapK7, data = mchClinical_restricted)
+
+png(filename = "Figure_3/Fig3F_gbmMetacohort_k7_survCurve.png", 
+    width = 2500, height = 1500, res = 300)
+ggsurvplot(
+    fit = fit,
+    palette = col_cl,
+    data = mchClinical_restricted,
+    xlab = "Months",
+    size = 1.3,
+    ggtheme = ggpubr::theme_pubr(),
+    pval = TRUE,
+    pval.coord = c(75, 0.75),
+    pval.size = 8,
+    legend.title = "cRegMap",
+    legend.labs = gsub("regmapK7=","",names(fit$strata)),
+    font.legend   = c(18, "bold", "black"),
+    font.x        = c(18, "bold", "black"),
+    font.y        = c(18, "bold", "black"),
+    font.caption  = c(18, "bold.italic", "black"),
+    font.tickslab = c(18, "bold", "black"),
+    break.x.by = 10,
+    xlim = c(0,100))
+dev.off()
+```
+
+# Fig3G recurrence sankey plot
+```{r}
+# primary classes with percentages
+lvlpri <- rec_gbm_tb %>% 
+    dplyr::select(PtID, Progression, cluster) %>% 
+    pivot_wider( values_from = cluster, names_from = Progression ) %>%
+    count(Initial) %>% 
+    mutate(across(.cols= -Initial, .fns= ~ round( .x/sum(.x), digits = 3)*100 )) %>% 
+    mutate(lvl = str_c(Initial, "  ", n,"%")) %>% 
+    dplyr::select(-n) %>% 
+    deframe()
+# recurrent classes with percentages
+lvlre <- rec_gbm_tb %>% 
+    dplyr::select(PtID, Progression, cluster) %>% 
+    pivot_wider( values_from = cluster, names_from = Progression ) %>%
+    count(Recurrent) %>% 
+    mutate(across(.cols= -Recurrent, .fns= ~ round( .x/sum(.x), digits = 3)*100 )) %>%
+    mutate(lvl = str_c(Recurrent, "  ", n,"%")) %>% 
+    dplyr::select(-n) %>% 
+    deframe()
+# make the dataframe with the correct levels of classes + percetanges
+sankey_t <- rec_gbm_tb %>% 
+    dplyr::select(PtID, Progression, cluster) %>% 
+    pivot_wider( values_from = cluster, names_from = Progression ) %>% 
+    mutate( Initial = factor(Initial, ordered = T ,
+                  levels = c("PN", "PN-L", "NL", "CL-A", "CL-B",
+                             "CL-C", "MES")),
+            Recurrent = factor(Recurrent, ordered = T ,
+                  levels = c("PN", "PN-L", "NL", "CL-A", "CL-B",
+                             "CL-C", "MES"))) %>% 
+    mutate(Initial = Initial %>% recode_factor(., !!!lvlpri),
+           Recurrent = Recurrent %>% recode_factor(., !!!lvlre))
+# add colors
+col_cl <- c("#C49A00", "#A58AFF","#00C094","#F8766D", "#00B6EB", "#53B400", "#FB61D7") %>%
+    rlang::set_names(lvlpri)
+col_cl1 <- c("#C49A00", "#A58AFF","#00C094","#F8766D", "#00B6EB", "#53B400", "#FB61D7") %>%
+    rlang::set_names(lvlre)
+
+n_clsters <- length(unique(sankey_t$Initial))
+
+levels_sankey <- c(
+    factor(sankey_t$Initial),
+    factor(sankey_t$Recurrent))
+
+sankey_replace_vctr <- set_names(1:length(levels(levels_sankey)) -1,
+                                   levels(levels_sankey))
+
+sankey_nodedt <- sankey_replace_vctr %>% tibble::enframe()
+
+sel_dt <- sankey_t %>%
+  dplyr::select(source = Initial, target = Recurrent) %>%
+  mutate(source = source %>% recode_factor(., !!!sankey_replace_vctr),
+         target = target %>% recode_factor(., !!!sankey_replace_vctr)) %>%
+  count(source, target, name = "value") %>%
+  mutate(across(everything(), ~as.character(.x) %>% as.numeric),
+         group = str_c("type_", source)) %>%
+  arrange(source) %>%
+  as.data.frame()
+
+node_color <- str_c(
+  'd3.scaleOrdinal() .domain([',
+  toString(sprintf("'%s'", c(levels(levels_sankey), unique(sel_dt$group)))),
+  "])",
+  " .range([",
+  toString(sprintf("'%s'", c(col_cl,
+                             col_cl1,
+                             col_cl,
+                             col_cl1))), "])")
+
+sankey_net  <-  sankeyNetwork(
+  Links  = sel_dt,
+  Nodes  = as.data.frame(sankey_nodedt),
+  Source = "source",
+  Target = "target",
+  Value  = "value",
+  NodeID = "name",
+  colourScale = node_color,
+  fontSize    = 35,
+  fontFamily  = "sans-serif",
+  nodeWidth   = 40,
+  LinkGroup   = "group")
+
+# save the widget to a temporary file
+html_tmp <- tempfile(fileext = ".html")
+htmlwidgets::saveWidget(sankey_net, html_tmp)
+# use webshot to create a png of the htmlwidget
+webshot::webshot(url = html_tmp,
+                 file = "Figure_3/Fig3G_sankeyPlot_k7_recurrent.png",
+                 delay = 0.2)
+```
+

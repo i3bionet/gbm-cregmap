@@ -1,0 +1,128 @@
+---
+title: "GBMcRegMap_Figure2_code"
+author: "pawlakG PAWLAK Geoffrey"
+author: "ConYel Konstantinos Geles"
+date: "Mon Dec 04 2023, Last Update: `r format(Sys.Date(), '%a %b %d %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    df_print: paged
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  html_notebook: null
+---
+
+# Global libraries 
+load libraries
+```{r setup libraries, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# functions
+source("Fig_misc_functions/misc_functions.R") 
+
+# data import and wrangling libraries
+library(dplyr)   #
+library(tibble)  #
+library(stringr) #
+library(forcats) #
+library(rlang)   #
+library(tidyr)   #
+library(vroom)
+
+# make the sankey plot
+library(networkD3)
+```
+
+# load data
+```{r}
+# influences and classification
+tcgbm <- vroom("../gbm_EDA/triple_class_sankey/seurat_classes_gbm.txt") %>% 
+  filter(lucgar!= "nc")
+load("../gbm_EDA/inf_gbm_with_cls.Rdata")
+#load("../gbm_EDA/pheno_all_G-CIMP.RData")
+```
+
+#  Fig 2D Sankeyplot
+## preprocess the data
+```{r}
+# prepare a dataframe with the classification
+seuratclusters <- inf_gbm_with_cls[,1] %>% 
+  enframe(name = "sample", value = "cRegMap") %>% 
+  mutate(cRegMap = cRegMap %>% 
+           str_c("C",.) %>% 
+           as.factor() %>% 
+           fct_recode(!!!re_format) %>% 
+           factor(., ordered = T ,
+                  levels = c("PN", "PN-L", "NL", "CL-A", "CL-B",
+                             "CL-C", "MES")),
+         sample = recodeTCGA(sample))
+
+col_cl <- c("#53B400", "#FB61D7", "#00B6EB", "#C49A00", "#A58AFF","#00C094","#F8766D") %>%
+    rlang::set_names(levels(seuratclusters$cRegMap))
+```
+
+## make the dataframe for sankey Networkd
+```{r}
+levels_sankey <- c(
+    factor(tcgbm$Verhaak),
+    factor(tcgbm$cRegMap, ordered = T ,
+           levels = c("PN", "PN-L", "NL", "CL-A", "CL-B",
+                                            "CL-C", "MES")),
+    factor(tcgbm$lucgar))
+
+sankey_replace_vctr <- set_names(1:length(levels(levels_sankey)) -1,
+                                   levels(levels_sankey))
+
+sankey_nodedt <- sankey_replace_vctr %>% tibble::enframe()
+
+sel_dt <- bind_rows(dplyr::select(tcgbm, source = Verhaak, target = cRegMap),
+                      dplyr::select(tcgbm, source = cRegMap, target = lucgar)) %>%
+    mutate(source = source %>% recode_factor(., !!!sankey_replace_vctr),
+           target = target %>% recode_factor(., !!!sankey_replace_vctr)) %>%
+    count(source, target, name = "value") %>%
+    mutate(across(everything(), ~as.character(.x) %>% as.numeric),
+           group = str_c("type_", source)) %>%
+    arrange(source) %>%
+    as.data.frame()
+
+col_cl
+classes_to_colors <- c("#F8766D", "#C49A00", "#00B6EB","#53B400"  ) %>%
+  set_names(levels(factor(tcgbm$lucgar)))
+node_color <- str_c(
+    'd3.scaleOrdinal() .domain([',
+    toString(sprintf("'%s'", c(levels(levels_sankey), unique(sel_dt$group)))),
+    "])",   # future function
+    " .range([",
+    toString(sprintf("'%s'", c(classes_to_colors_Verhak[levels(factor(tcgbm$Verhaak))],
+                               col_cl,
+                               classes_to_colors[levels(factor(tcgbm$lucgar))],
+                               classes_to_colors_Verhak[levels(factor(tcgbm$Verhaak))],
+                               col_cl))), "])")
+
+sankey_net  <-  sankeyNetwork(
+    Links  = sel_dt,
+    Nodes  = as.data.frame(sankey_nodedt),
+    Source = "source",
+    Target = "target",
+    Value  = "value",
+    NodeID = "name",
+    colourScale = node_color,
+    fontSize    = 30,
+    nodeWidth   = 40,
+    LinkGroup   = "group")
+
+```
+
+## Export the Sankeyplot
+```{r}
+# save the widget to a temporary file
+html_tmp <- tempfile(fileext = ".html")
+htmlwidgets::saveWidget(sankey_net, html_tmp)
+# use webshot to create a png of the htmlwidget
+webshot::webshot(url = html_tmp,
+                 file = "Figure_2/Fig2D_sankeyPlot_k7_Verhaak.png",
+                 delay = 0.2)
+```
+
+

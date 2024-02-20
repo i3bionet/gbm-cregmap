@@ -1,0 +1,39 @@
+Package: GBMRegMap
+Title: GBMRegMap
+Version: 0.0.1
+Authors@R: 
+    person("Geoffrey", "Pawlak", , "geoffrey.pawlak@univ-lille.fr", role = c("cre", "aut"))
+Description: PKG_DESC.
+License: What license is it under?
+Imports: 
+    config (>= 0.3.1),
+    data.table,
+    dplyr,
+    e1071,
+    ggplot2,
+    ggrepel,
+    golem (>= 0.3.3),
+    gplots,
+    gtools,
+    purrr,
+    RColorBrewer,
+    rlang,
+    rlist,
+    scales,
+    Seurat,
+    shiny (>= 1.7.2),
+    shinybusy,
+    shinythemes,
+    shinyWidgets,
+    stringr,
+    tidyr,
+    visNetwork,
+    waiter
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.2.1
+Depends: 
+    R (>= 2.10)
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
