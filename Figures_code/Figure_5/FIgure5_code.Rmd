@@ -1,8 +1,9 @@
 ---
 title: "GBMcRegMap_Figure5_code"
-author: "pawlakG PAWLAK Geoffrey"
-author: "ConYel Konstantinos Geles"
-date: "Mon Dec 04 2023, Last Update: `r format(Sys.Date(), '%a %b %d %Y')`"
+author: 
+- "pawlakG PAWLAK Geoffrey"
+- "ConYel Konstantinos Geles"
+date: "Mon Dec 04 2023, Last Update: Thu Feb 29 2024 `r format(Sys.Date(), '%a %b %d %Y')`"
 output:
   html_document:
     toc: yes
@@ -19,7 +20,8 @@ load libraries
 ```{r setup libraries, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 # functions
-source("./Fig_misc_functions/misc_functions.R") 
+source(here("Figures_code", "Fig_misc_functions", "misc_functions.R")) 
+here()
 # data wrangling libraries
 library(dplyr)   #
 library(stringr) #
@@ -41,7 +43,7 @@ library(patchwork)    #
 
 # load data
 ```{r}
-inf_mat <- vroom::vroom("../gbm_EDA/influence_U87MG_U87MGRR50_U87MGOFF.csv") %>%
+inf_mat <- here("Figures_code", "data", "influence_U87MG_U87MGRR50_U87MGOFF.csv") %>% 
     dplyr::rename("Gene_ID" = "...1") %>%
     column_to_rownames("Gene_ID") %>%
     as.matrix()
@@ -161,7 +163,7 @@ ht_ahC <- gr_gghm +
 ### save the plot        -------
 ggsave(plot     = ht_ahC,
        device   = "png",
-       filename = file.path("Figure_5/Fig5B_heatmap.png"),
+       filename = here("Figures_code", "Figure_5", "Fig5B_heatmap.png"),
        units    = "in",
        width    = 8,
        height   = 10,

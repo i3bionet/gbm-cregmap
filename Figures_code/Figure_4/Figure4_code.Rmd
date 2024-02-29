@@ -1,8 +1,9 @@
 ---
 title: "GBMcRegMap_Figure4_code"
-author: "pawlakG PAWLAK Geoffrey"
-author: "ConYel Konstantinos Geles"
-date: "Mon Dec 04 2023, Last Update: `r format(Sys.Date(), '%a %b %d %Y')`"
+author: 
+- "pawlakG PAWLAK Geoffrey"
+- "ConYel Konstantinos Geles"
+date: "Mon Dec 04 2023, Last Update: Thu Feb 29 2024 `r format(Sys.Date(), '%a %b %d %Y')`"
 output:
   html_document:
     toc: yes
@@ -18,8 +19,10 @@ output:
 load libraries
 ```{r setup libraries, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(here)
+here()
 # functions
-source("./Fig_misc_functions/misc_functions.R") 
+source(here("Figures_code", "Fig_misc_functions", "misc_functions.R")) 
 # data wrangling libraries
 library(readr)
 library(dplyr)   #
@@ -35,79 +38,16 @@ library(vroom)
 library(ggplot2)         #
 library(ggheatmapper)
 library(patchwork)
-
-
-
 ```
-
 
 # load data
 ```{r}
 # load colors
 wes_cols <- c(wesanderson::wes_palettes$Zissou1[5:1])
 
-dirs_crispcas_k7 <- read_rds("../gbm_EDA/fig4c heatmap/dirsCripsrCas0_results.rds")
-gbmK7 <- read_rds("../gbm_EDA/fig4c heatmap/gbmK7.rds")
-inf <- read_rds("../gbm_EDA/fig4c heatmap/inf.rds")
-
-
-#######################
-# load Verhaak classification
-load("../gbm_EDA/pheno_all_G-CIMP.RData")
-gdata::mv(from = "pheno.all", to = "gbmVerhaak")
-names(gbmVerhaak) <- recodeTCGA(names(gbmVerhaak))
-gbmVerhaak <- gbmVerhaak[!(duplicated(names(gbmVerhaak)))]
-gbmVerhaak1 <- gbmVerhaak %>%
-  fct_recode(., !!!levels_gbm_Verhaak ) %>% 
-  enframe(name = "sample", value = "Verhaak")
-
-# Load expression data
-load("../gbm_EDA/neuroOncology/scripts/inputs/exp_GBM/data_TCGAGBM_agilent.RData")
-expTcga1 <- data
-expTcga1[is.na(expTcga1)] <- 0
-# Recode samples' name
-colnames(expTcga1) <- recodeTCGA(colnames(expTcga1))
-# --------------------------- # 
-# Keep common samples with classification
-expTcga1 <- expTcga1[, intersect(gbmVerhaak1$sample, colnames(expTcga1))]
-
-# influences and classification
-load("../gbm_EDA/inf_gbm_with_cls.Rdata")
-seuratclusters <- inf_gbm_with_cls[,1] %>% 
-  enframe(name = "sample", value = "cRegMap") %>% 
-  mutate(cRegMap = cRegMap %>% 
-           str_c("C",.) %>% 
-           as.factor() %>% 
-           fct_recode(!!!re_format) %>% 
-           factor(., ordered = T ,
-                  levels = c("PN", "PN-L", "NL", "CL-A", "CL-B",
-                             "CL-C", "MES")),
-         sample = recodeTCGA(sample))
-
-col_cl <- c("#53B400", "#FB61D7", "#00B6EB", "#C49A00", "#A58AFF","#00C094","#F8766D") %>%
-    rlang::set_names(levels(seuratclusters$cRegMap))
-
-# Load DE genes
-signifDEagil_k7 <- map(1:7 %>% set_names(str_c("C",.)), 
-    ~readxl::read_xls("../gbm_EDA/GBMTCGAK7DEG_with_cutoff.xls", sheet = .x, 
-                      col_names = c("gene", "adj_pv", "logFC"), skip = 1)) 
-names(signifDEagil_k7) <- c("MES", "CL-A",  "PN",  "CL-C", "NL", "CL-B","PN-L")
-
-# load deconvolution results
-decon_res <- vroom::vroom("../gbm_EDA/GBMDeconvoluteR_GBMrnaseq.csv") %>% 
-  dplyr::rename(sample = Mixture) %>% 
-  mutate(sample = recodeTCGA(sample)) %>% 
-  pivot_longer(-sample, names_to = "cell_type", values_to = "cell_type_estimate" )
-
-# purity plots
-pur_TCGA_rnaseq_inp <- vroom::vroom("../gbm_EDA/TCGA_rnaseq_for_puree.txt") %>% 
-    pull(sample)
-
-pur_TCGA_rnaseq <- vroom::vroom("../gbm_EDA/puree_TCGA_rnaseq.txt") %>% 
-    mutate(sample = pur_TCGA_rnaseq_inp)
-
-# survival plot
-mchClinical <- readRDS("../gbm_EDA/phenotypeInfo.RDS") 
+dirs_crispcas_k7 <- read_rds(here("Figures_code", "data", "dirsCripsrCas0_results.rds"))
+gbmK7 <- read_rds(here("Figures_code", "data", "gbmK7.rds"))
+inf <- read_rds(here("Figures_code", "data", "inf.rds"))
 ```
 
 # Fig 4A Influences heatmap
@@ -186,13 +126,7 @@ top10SeuratInfMatrix %>%
 quantile_df <- function(x, probs = c(0, 0.25, 0.5, 0.75, 1)) {
     tibble(quantile = probs, value = quantile(x, probs))
 }
-to_scales <- top10SeuratInfMatrix %>%
-    dplyr::select(-c(sample)) %>%
-    pivot_longer(-group) %>%
-    dplyr::select(-c(group)) %>%
-    reframe(across(-name, quantile_df)) %>%
-    pull("value") %>%
-    deframe()
+
 to_scales <- top10SeuratInfMatrix  %>%
     dplyr::select(-c(sample)) %>%
     pivot_longer(-group) %>%
@@ -260,7 +194,7 @@ hm_infTop10DIRs <- gr_gghm +
   
 ggsave(plot     = hm_infTop10DIRs,
        device   = "png",
-       filename = file.path("Figure_4/Fig4A_heatmap_influences.png"),
+       filename = here("Figures_code", "Figure_4", "Fig4A_heatmap_influences.png"),
        units    = "in",
        width    = 8,
        height   = 10,
