@@ -1,8 +1,9 @@
 ---
 title: "GBMcRegMap_Figure3_code"
-author: "pawlakG PAWLAK Geoffrey"
-author: "ConYel Konstantinos Geles"
-date: "Mon Dec 04 2023, Last Update: `r format(Sys.Date(), '%a %b %d %Y')`"
+author: 
+- "pawlakG PAWLAK Geoffrey"
+- "ConYel Konstantinos Geles"
+date: "Mon Dec 04 2023, Last Update: Thu Feb 29 2024 `r format(Sys.Date(), '%a %b %d %Y')`"
 output:
   html_document:
     toc: yes
@@ -18,8 +19,11 @@ output:
 load libraries
 ```{r setup libraries, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(here)
+here()
 # functions
-source("./Fig_misc_functions/misc_functions.R") 
+source(here("Figures_code", "Fig_misc_functions", "misc_functions.R")) 
+
 # data wrangling libraries
 library(dplyr)   #
 library(tibble)  #
@@ -65,18 +69,18 @@ library(networkD3) #
 wes_cols <- c(wesanderson::wes_palettes$Zissou1[5:1])
 
 # load Verhaak classification
-load("../gbm_EDA/pheno_all_G-CIMP.RData")
-gdata::mv(from = "pheno.all", to = "gbmVerhaak")
+
+gbmVerhaak <- load_rdata(here("Figures_code", "data", "pheno_all_G-CIMP.RData"))
 names(gbmVerhaak) <- recodeTCGA(names(gbmVerhaak))
 gbmVerhaak <- gbmVerhaak[!(duplicated(names(gbmVerhaak)))]
 gbmVerhaak1 <- gbmVerhaak %>%
   fct_recode(., !!!levels_gbm_Verhaak ) %>% 
   enframe(name = "sample", value = "Verhaak")
 
-# Load expression data
-load("../gbm_EDA/neuroOncology/scripts/inputs/exp_GBM/data_TCGAGBM_agilent.RData")
-expTcga1 <- data
+# Load expression data 
+expTcga1 <- load_rdata(here("Figures_code", "data", "data_TCGAGBM_agilent.RData"))
 expTcga1[is.na(expTcga1)] <- 0
+
 # Recode samples' name
 colnames(expTcga1) <- recodeTCGA(colnames(expTcga1))
 # --------------------------- # 
@@ -84,7 +88,8 @@ colnames(expTcga1) <- recodeTCGA(colnames(expTcga1))
 expTcga1 <- expTcga1[, intersect(gbmVerhaak1$sample, colnames(expTcga1))]
 
 # influences and classification
-load("../gbm_EDA/inf_gbm_with_cls.Rdata")
+inf_gbm_with_cls <- load_rdata(here("Figures_code", "data", "inf_gbm_with_cls.Rdata"))
+
 seuratclusters <- inf_gbm_with_cls[,1] %>% 
   enframe(name = "sample", value = "cRegMap") %>% 
   mutate(cRegMap = cRegMap %>% 
@@ -101,28 +106,32 @@ col_cl <- c("#53B400", "#FB61D7", "#00B6EB", "#C49A00", "#A58AFF","#00C094","#F8
 
 # Load DE genes
 signifDEagil_k7 <- map(1:7 %>% set_names(str_c("C",.)), 
-    ~readxl::read_xls("../gbm_EDA/GBMTCGAK7DEG_with_cutoff.xls", sheet = .x, 
+    ~readxl::read_xls(here("Figures_code", "data", "GBMTCGAK7DEG_with_cutoff.xls"), sheet = .x, 
                       col_names = c("gene", "adj_pv", "logFC"), skip = 1)) 
 names(signifDEagil_k7) <- c("MES", "CL-A",  "PN",  "CL-C", "NL", "CL-B","PN-L")
 
 # load deconvolution results
-decon_res <- vroom::vroom("../gbm_EDA/GBMDeconvoluteR_GBMrnaseq.csv") %>% 
+decon_res <- here("Figures_code", "data", "GBMDeconvoluteR_GBMrnaseq.csv")%>% 
+  vroom() %>% 
   dplyr::rename(sample = Mixture) %>% 
   mutate(sample = recodeTCGA(sample)) %>% 
   pivot_longer(-sample, names_to = "cell_type", values_to = "cell_type_estimate" )
 
 # purity plots
-pur_TCGA_rnaseq_inp <- vroom::vroom("../gbm_EDA/TCGA_rnaseq_for_puree.txt") %>% 
-    pull(sample)
+pur_TCGA_rnaseq_inp <- here("Figures_code", "data", "TCGA_rnaseq_for_puree.txt")%>% 
+  vroom() %>% 
+  pull(sample)
 
-pur_TCGA_rnaseq <- vroom::vroom("../gbm_EDA/puree_TCGA_rnaseq.txt") %>% 
+pur_TCGA_rnaseq <- here("Figures_code", "data", "puree_TCGA_rnaseq.txt") %>% 
+    vroom()  %>% 
     mutate(sample = pur_TCGA_rnaseq_inp)
 
 # survival plot
-mchClinical <- readRDS("../gbm_EDA/phenotypeInfo.RDS") 
+mchClinical <- readRDS(here("Figures_code", "data", "phenotypeInfo.RDS")) 
 
 # recurrenece
-rec_gbm_tb <- vroom("../gbm_EDA/recurrent/all248samples_GBM_cRegMap_class.txt")
+rec_gbm_tb <- here("Figures_code", "data", "all248samples_GBM_cRegMap_class.txt") %>% 
+  vroom()
 ```
 
 # Fig 3A Complex Heatmap GBM
@@ -225,7 +234,7 @@ ht_mat <- Heatmap(
     clustering_distance_rows    = "euclidean"
 )
 
-png(filename = "Figure_3/Fig3A_complex_heatmap.png",
+png(filename = here("Figures_code", "Figure_3", "Fig3A_complex_heatmap.png"),
       height   = 20.3,
       width    = 9,
       units    = 'in',
@@ -350,7 +359,7 @@ ck_GO2_p <- dotplot(ck_GO2, label_format = 80, showCategory = 40) +
 ```{r}
 ggsave(plot     = ck_GO2_p,
        device   = "png",
-       filename = "Figure_3/Fig3B_gbm_compare_GO_k7.png",
+       filename = here("Figures_code", "Figure_3", "Fig3B_gbm_compare_GO_k7.png"),
        units    = "in",
        width    = 10,
        height   = 8,
@@ -455,9 +464,7 @@ names(vc_cols) = c(
 # ---------------------------------------------------------------------------- %
 # Plot full oncoplot
 
-file_folder <- "Figure_3"
-
-png(filename =  file.path(file_folder, "Fig3C_GBM_all_clusters_oncoplot.png"),
+png(filename =  here("Figures_code", "Figure_3", "Fig3C_GBM_all_clusters_oncoplot.png"),
     width = 1800, height = 2000, res = 300)
 
 oncoplot(MutationalData,
@@ -476,7 +483,7 @@ for (group in unique(MutationalData@clinical.data$seuratClusters)){
     sub_seurat <- seuratclustersb[seuratclustersb == group]
     sub_MutationalData <- subsetMaf(maf = MutationalData, tsb = names(sub_seurat))
     if (length(unique(sub_MutationalData@data$Tumor_Sample_Barcode))>3){
-    png(filename = file.path(file_folder, paste0("Fig3C_GBM_", group, "_hr_genes.png")), 
+    png(filename = here("Figures_code", "Figure_3", paste0("Fig3C_GBM_", group, "_hr_genes.png")), 
         width = 1800, height = 2000, res = 300)
     oncoplot(sub_MutationalData,
              clinicalFeatures = 'seuratClusters',
@@ -521,27 +528,23 @@ GO_gene_set <- map(GOBP, ~ GO_gene_sets %>%
 GO_gene_set_names <- map(GO_gene_set, ~pull(.x, gs_name) %>% 
                            unique())
 names(GO_gene_set) <- GO_gene_set_names
-# h_gene_set_OXPHO <- h_gene_sets %>%  filter(str_detect(gs_name, "OXIDATIVE_PHOSPHORYLATION"))
-
 
 rankData <- singscore::rankGenes(expTcga1)
-# list("HIF1_signature" = HIF1_GS, "AMPK_signature" = AMPK))
 genes_intersect <- 
   map(c(h_gene_set, GO_gene_set), 
         ~intersect(rownames(expTcga1), unique(.x$gene_symbol)))
-#genes_int_OXPHO <- intersect(rownames(expTcga1), unique(h_gene_set_OXPHO$gene_symbol))
+
 scores_agilent <- map(genes_intersect,
                       ~simpleScore(rankData,  upSet = .x) %>% 
   as_tibble(rownames = "sample")) %>% 
   bind_rows(.id = "Hallmark")
 
-#scores_OXPHO  <-  simpleScore(rankData, upSet = genes_int_OXPHO) 
-                    
+                   
 ### save terms  ------
 wb <- createWorkbook()
 addWorksheet(wb, "S1")
 writeDataTable(wb, "S1", x = scores_agilent, withFilter = FALSE)
-saveWorkbook(wb, file.path("tcga_agilent_gbm_score_hallmarks_GOBP.xlsx"),
+saveWorkbook(wb, here("Figures_code", "Figure_3", "tcga_agilent_gbm_score_hallmarks_GOBP.xlsx"),
              overwrite = TRUE)
 
 ```
@@ -562,7 +565,6 @@ annotdt <- decon_res %>%
     ))) %>% 
     dplyr::rename("Cell type" = cell_type) %>% 
     column_to_rownames("colcr")
-
 
 seuratclusters_rnaseq <- decon_res %>%
     group_by(cRegMap, cell_type) %>%
@@ -671,18 +673,10 @@ ht_1 <- Heatmap(
     height = nrow(seuratclusters_rnaseq)*unit(20, "mm")
 )  
 
-# draw(ht_1, heatmap_legend_side="right", 
-#      annotation_legend_side="right",
-#            legend_grouping = "original")
-################################################################################ 
-##add the signscore heatmap
-
 sign_score <- readxl::read_xlsx("../gbm_EDA/tcga_agilent_gbm_score_hallmarks_GOBP.xlsx")  %>% 
   dplyr::select(-TotalDispersion) %>% 
   pivot_wider(names_from = "Hallmark", values_from = "TotalScore") %>% 
   dplyr::select(-starts_with("HALLMARK_EPITHELIAL"))
-
-#rowv <- sign_score %>% dplyr::select(-sample) %>% names
 
 sign_score <- sign_score %>% 
   left_join(seuratclusters, 
@@ -741,7 +735,7 @@ ht_2 <- Heatmap(
 
 ht_list  <-  ht_1 %v% ht_2 
 
-png(filename = "Figure_3/Fig3D_GBM_signscore_deconv.png",
+png(filename = here("Figures_code", "Figure_3", "Fig3D_GBM_signscore_deconv.png"),
       height   = 14,
       width    = 10,
       units    = 'in',
@@ -773,7 +767,7 @@ purity_plot <- pur_TCGA_rnaseq %>%
 
 ggsave(plot = purity_plot,
          device = "png",
-         filename = file.path("Figure_3/Fig3E_purity_plot_tcga.png"),
+         filename = here("Figures_code", "Figure_3", "Fig3E_purity_plot_tcga.png"),
          units = "in",
          width = 8,
          height = 16,
@@ -801,7 +795,7 @@ mchClinical_restricted <- mchClinical %>%
 
 fit <- survfit(Surv(survival, status) ~ regmapK7, data = mchClinical_restricted)
 
-png(filename = "Figure_3/Fig3F_gbmMetacohort_k7_survCurve.png", 
+png(filename = here("Figures_code", "Figure_3", "Fig3F_gbmMetacohort_k7_survCurve.png"), 
     width = 2500, height = 1500, res = 300)
 ggsurvplot(
     fit = fit,
@@ -912,7 +906,7 @@ html_tmp <- tempfile(fileext = ".html")
 htmlwidgets::saveWidget(sankey_net, html_tmp)
 # use webshot to create a png of the htmlwidget
 webshot::webshot(url = html_tmp,
-                 file = "Figure_3/Fig3G_sankeyPlot_k7_recurrent.png",
+                 file = here("Figures_code", "Figure_3", "Fig3G_sankeyPlot_k7_recurrent.png"),
                  delay = 0.2)
 ```
 
