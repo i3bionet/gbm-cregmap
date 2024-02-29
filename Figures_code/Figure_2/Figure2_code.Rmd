@@ -1,8 +1,9 @@
 ---
 title: "GBMcRegMap_Figure2_code"
-author: "pawlakG PAWLAK Geoffrey"
-author: "ConYel Konstantinos Geles"
-date: "Mon Dec 04 2023, Last Update: `r format(Sys.Date(), '%a %b %d %Y')`"
+author: 
+- "pawlakG PAWLAK Geoffrey"
+- "ConYel Konstantinos Geles"
+date: "Mon Dec 04 2023, Last Update: Thu Feb 29 2024 `r format(Sys.Date(), '%a %b %d %Y')`"
 output:
   html_document:
     toc: yes
@@ -18,8 +19,10 @@ output:
 load libraries
 ```{r setup libraries, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(here)
+here()
 # functions
-source("Fig_misc_functions/misc_functions.R") 
+source(here("Figures_code", "Fig_misc_functions", "misc_functions.R")) 
 
 # data import and wrangling libraries
 library(dplyr)   #
@@ -37,10 +40,11 @@ library(networkD3)
 # load data
 ```{r}
 # influences and classification
-tcgbm <- vroom("../gbm_EDA/triple_class_sankey/seurat_classes_gbm.txt") %>% 
+tcgbm <- here("Figures_code", "data", "seurat_classes_gbm.txt") %>% 
+  vroom() %>% 
   filter(lucgar!= "nc")
-load("../gbm_EDA/inf_gbm_with_cls.Rdata")
-#load("../gbm_EDA/pheno_all_G-CIMP.RData")
+
+inf_gbm_with_cls <- load_rdata(here("Figures_code", "data", "inf_gbm_with_cls.Rdata"))
 ```
 
 #  Fig 2D Sankeyplot
@@ -121,7 +125,7 @@ html_tmp <- tempfile(fileext = ".html")
 htmlwidgets::saveWidget(sankey_net, html_tmp)
 # use webshot to create a png of the htmlwidget
 webshot::webshot(url = html_tmp,
-                 file = "Figure_2/Fig2D_sankeyPlot_k7_Verhaak.png",
+                 file = here("Figures_code", "Figure_2", "Fig2D_sankeyPlot_k7_Verhaak.png"),
                  delay = 0.2)
 ```
 

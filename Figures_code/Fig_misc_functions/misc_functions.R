@@ -3,7 +3,7 @@ library(ggplot2)
 
 
 recodeTCGA <- function(names){
-#' Title
+#' recodeTCGA
 #'
 #' @param names vector ....
 #'
@@ -201,6 +201,22 @@ quantile_df <- function(x, probs = c(0, 0.25, 0.5, 0.75, 1)) {
     tibble(quantile = probs, value = quantile(x, probs))
 }
 
+# load_rdata------------------------------------------------
+#' load_rdata
+#'
+#' @param file_path
+#'
+#' @return
+#' @export
+#'
+#' @examples
+load_rdata <- function(file_path) {
+    res <- local({
+        load(file_path)
+        return(get(ls()))
+    })
+    return(res)
+}
 
 # object to format classification levels
 re_format <- c(
